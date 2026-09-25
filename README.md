@@ -1,42 +1,48 @@
-![](../../workflows/gds/badge.svg) ![](../../workflows/docs/badge.svg) ![](../../workflows/test/badge.svg) ![](../../workflows/fpga/badge.svg)
+![GDS](../../workflows/gds/badge.svg) ![Docs](../../workflows/docs/badge.svg) ![Test](../../workflows/test/badge.svg) ![FPGA](../../workflows/fpga/badge.svg)
 
-# Tiny Tapeout Verilog Project Template
+# proto-emu — Protocol Emulator ASIC
 
-- [Read the documentation for project](docs/info.md)
+A programmable protocol emulator chip submitted to the [Jane Street ASIC Competition](https://asic-competition.janestreet.com) via [Tiny Tapeout](https://tinytapeout.com)'s CMOS5L process.
 
-## What is Tiny Tapeout?
+**The idea:** a tiny CPU with an instruction set designed for reading pins, writing pins, and counting cycles with precise timing — so hardware protocols can be implemented in firmware rather than fixed logic. Similar in spirit to the RP2040's PIO state machines or TI's PRU cores, but our own design.
 
-Tiny Tapeout is an educational project that aims to make it easier and cheaper than ever to get your digital and analog designs manufactured on a real chip.
+## Goals
 
-To learn more and get started, visit https://tinytapeout.com.
+**Primary protocols:** UART · SPI · I2C  
+**Stretch goals:** JTAG · SWD · PS/2 · CAN · low-speed USB · 10Mbit Ethernet
 
-## Set up your Verilog project
+## Process
 
-1. Add your Verilog files to the `src` folder.
-2. Edit the [info.yaml](info.yaml) and update information about your project, paying special attention to the `source_files` and `top_module` properties. If you are upgrading an existing Tiny Tapeout project, check out our [online info.yaml migration tool](https://tinytapeout.github.io/tt-yaml-upgrade-tool/).
-3. Edit [docs/info.md](docs/info.md) and add a description of your project.
-4. Adapt the testbench to your design. See [test/README.md](test/README.md) for more information.
+- **Foundry:** IHP 130nm CMOS5L via Tiny Tapeout
+- **Tile allocation:** 6×4 (~0.7 mm²)
+- **Top module:** `tt_um_thayworth2_proto_emu`
+- **Deadline:** January 18, 2027
 
-The GitHub action will automatically build the ASIC files using [LibreLane](https://www.zerotoasiccourse.com/terminology/librelane/).
+## Repository layout
 
-## Enable GitHub actions to build the results page
+```
+src/        RTL source files
+test/       Cocotb testbench
+docs/       Project datasheet (info.md)
+info.yaml   Project metadata and pinout
+tt/         Tiny Tapeout support tools (do not edit)
+```
 
-- [Enabling GitHub Pages](https://tinytapeout.com/faq/#my-github-action-is-failing-on-the-pages-part)
+## Getting started
+
+1. Add Verilog files to `src/` and list them in `info.yaml` under `source_files`.
+2. Update the pinout in `info.yaml` as the design solidifies.
+3. Edit `docs/info.md` for the project datasheet.
+4. Run `make` in `test/` to run the cocotb testbench.
+5. The GDS CI workflow runs automatically on push — check the badge above.
+
+If you have an FPGA, test your RTL there before committing to the full ASIC flow.
 
 ## Resources
 
-- [FAQ](https://tinytapeout.com/faq/)
-- [Digital design lessons](https://tinytapeout.com/digital_design/)
-- [Learn how semiconductors work](https://tinytapeout.com/siliwiz/)
-- [Join the community](https://tinytapeout.com/discord)
-- [Build your design locally](https://www.tinytapeout.com/guides/local-hardening/)
-
-## What next?
-
-- [Submit your design to the next shuttle](https://app.tinytapeout.com/).
-- Edit [this README](README.md) and explain your design, how it works, and how to test it.
-- Share your project on your social network of choice:
-  - LinkedIn [#tinytapeout](https://www.linkedin.com/search/results/content/?keywords=%23tinytapeout) [@TinyTapeout](https://www.linkedin.com/company/100708654/)
-  - Mastodon [#tinytapeout](https://chaos.social/tags/tinytapeout) [@matthewvenn](https://chaos.social/@matthewvenn)
-  - X (formerly Twitter) [#tinytapeout](https://twitter.com/hashtag/tinytapeout) [@tinytapeout](https://twitter.com/tinytapeout)
-  - Bluesky [@tinytapeout.com](https://bsky.app/profile/tinytapeout.com)
+- [Tiny Tapeout docs](https://tinytapeout.com)
+- [CMOS5L template](https://github.com/TinyTapeout/tt10-verilog-template)
+- [IHP 130nm PDK](https://github.com/IHP-GmbH/IHP-Open-PDK)
+- [RP2040 PIO reference](https://datasheets.raspberrypi.com/rp2040/rp2040-datasheet.pdf) (§3)
+- [TI PRU reference](https://www.ti.com/lit/ug/spruhj7/spruhj7.pdf)
+- [Jane Street competition page](https://asic-competition.janestreet.com)

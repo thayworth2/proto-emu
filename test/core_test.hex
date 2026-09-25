@@ -1,0 +1,6 @@
+// Minimal-core smoke-test program (build order step 2).
+// side_set_count = 0 (hardcoded in project.v), so all 5 delay/ss bits are delay; delay=0 everywhere.
+A080FF // addr0: SET pindirs, 0xFF        -- all 8 core pins as outputs
+80A000 // addr1: PULL block               -- TX FIFO -> OSR
+600800 // addr2: OUT pins, 8              -- top 8 bits of OSR -> pins
+000001 // addr3: JMP always, 1            -- loop back to PULL
