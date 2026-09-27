@@ -13,3 +13,8 @@ test/results.xml
 test/gate_level_netlist.v
 tt/
 runs/
+
+.venv/
+build/
+__pycache__/
+.pytest_cache/

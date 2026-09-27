@@ -42,3 +42,10 @@ COCOTB_TEST_MODULES = test
 
 # include cocotb's make rules to take care of the simulator setup
 include $(shell cocotb-config --makefiles)/Makefile.sim
+
+# Regenerate the $readmemh default image from its assembly source. Tests load their
+# own programs through the harness; tools/tests checks this file is not stale.
+hex: core_test.hex
+core_test.hex: programs/core_test.asm ../tools/asm.py ../tools/isa.py ../src/proto_emu_pkg.vh
+	python3 ../tools/asm.py $< -o $@
+.PHONY: hex

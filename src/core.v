@@ -126,8 +126,10 @@ module core #(
   // Stall: block on PULL when TX FIFO is empty and the instruction asks
   // to block. Non-blocking PULL against an empty FIFO is a no-op.
   // ---------------------------------------------------------------------
+  // Gated by rst_n so nothing executes during reset: X/Y/OSR/pin values have no reset
+  // of their own and must hold their contents while rst_n is low.
   wire stall_now       = enable && (delay_cnt == 0) && is_pull && pp_block && tx_empty;
-  wire instr_executing = enable && (delay_cnt == 0) && !stall_now;
+  wire instr_executing = rst_n && enable && (delay_cnt == 0) && !stall_now;
 
   wire osr_load = instr_executing && is_pull && !tx_empty;
   assign tx_rd_en = osr_load;

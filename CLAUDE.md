@@ -226,7 +226,9 @@ the verification story for the writeup.
 - **Formal:** worth targeting properties like "no X reaches an output pin," "PC always within wrap
   bounds," "FIFO pointers never pass each other."
 
-Run `make` in `test/` for cocotb locally. GDS CI runs LibreLane — check the badge and action logs
+Run `make` in `test/` for cocotb locally (every test runs RTL and model in lockstep via
+`test/harness.py`), and `pytest tools` for assembler/model unit tests. Test programs live in
+`test/programs/*.asm`; after editing `core_test.asm`, run `make -C test hex`. GDS CI runs LibreLane — check the badge and action logs
 after pushing.
 
 ---

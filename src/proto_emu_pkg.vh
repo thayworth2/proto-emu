@@ -53,6 +53,21 @@
 `define JMP_COND_OSR_NE   4'd7  // reserved until OSR-empty tracking lands
 
 // ---------------------------------------------------------------------------
+// WAIT argument fields: [15] polarity, [14:13] source, [12:8] index, [7:0] reserved
+// (decoded by tools/asm.py today; RTL support lands in build order step 7)
+// ---------------------------------------------------------------------------
+`define WAIT_POL_BIT   15
+`define WAIT_SRC_HI    14
+`define WAIT_SRC_LO    13
+`define WAIT_IDX_HI    12
+`define WAIT_IDX_LO    8
+
+`define WAIT_SRC_PIN   2'b00  // relative to core input base
+`define WAIT_SRC_GPIO  2'b01  // absolute pin
+`define WAIT_SRC_TIMER 2'b10
+`define WAIT_SRC_FLAG  2'b11
+
+// ---------------------------------------------------------------------------
 // SET argument fields: [15:13] destination, [12:8] reserved, [7:0] immediate
 // ---------------------------------------------------------------------------
 `define SET_DEST_HI    15
