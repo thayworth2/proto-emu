@@ -9,7 +9,7 @@ TOOLS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS))
 
 import asm  # noqa: E402
-from model import Config, Core, NotInRTL, UseBeforeInit  # noqa: E402
+from model import Config, Core, NotInRTL, ResetSync, UseBeforeInit  # noqa: E402
 
 
 def make(src, **cfg):
@@ -78,3 +78,12 @@ def test_wrap_bounds():
     core = make("set x, 1\nset x, 2\nset x, 3", wrap_bottom=1, wrap_top=2)
     run(core, 3)
     assert core.pc == 1 and core.x == 3   # pc 2 == wrap_top -> wrap_bottom, not 3
+
+
+def test_reset_sync_asserts_at_once_releases_after_two_edges():
+    rs = ResetSync()
+    with pytest.raises(UseBeforeInit):
+        rs.step(True)
+    assert rs.step(False) is False
+    assert [rs.step(True) for _ in range(3)] == [False, False, True]
+    assert rs.step(False) is False and rs.out == 0

@@ -31,6 +31,15 @@ module tt_um_thayworth2_proto_emu (
   localparam [`PROG_ADDR_W-1:0] WRAP_TOP    = {`PROG_ADDR_W{1'b1}};
   localparam [1:0]              SIDE_SET_COUNT = 2'b00;
 
+  // Every block below resets from rst_n_sync, never the raw rst_n.
+  wire rst_n_sync;
+
+  reset_sync u_reset_sync (
+      .clk       (clk),
+      .rst_n     (rst_n),
+      .rst_n_sync(rst_n_sync)
+  );
+
   wire [`PROG_ADDR_W-1:0] pc_addr;
   wire [`INSTR_W-1:0]     instr;
 
@@ -54,7 +63,7 @@ module tt_um_thayworth2_proto_emu (
       .WIDTH(`REG_WIDTH)
   ) tx_fifo (
       .clk    (clk),
-      .rst_n  (rst_n),
+      .rst_n  (rst_n_sync),
       .wr_en  (tx_wr_en),    // left undriven here; testbench pokes this directly
       .wr_data(tx_wr_data),  // for now, until host_spi.v (build order step 7)
       .full   (tx_full),
@@ -69,7 +78,7 @@ module tt_um_thayworth2_proto_emu (
 
   core u_core (
       .clk           (clk),
-      .rst_n         (rst_n),
+      .rst_n         (rst_n_sync),
 
       .enable        (ENABLE),
       .start_addr    (START_ADDR),

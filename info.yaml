@@ -18,6 +18,7 @@ project:
   # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
   # proto_emu_pkg.vh is `include`d by the files below, not listed separately.
   source_files:
+    - "reset_sync.v"
     - "progmem.v"
     - "fifo.v"
     - "shiftreg.v"

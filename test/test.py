@@ -7,10 +7,12 @@ bug shared by the RTL and the model would pass the lockstep comparison."""
 from pathlib import Path
 
 import cocotb
+from cocotb.triggers import ReadOnly, Timer
 
 from harness import Divergence, Harness
 
 import asm  # on sys.path via harness
+from model import ResetSync
 
 PROGRAMS = Path(__file__).parent / "programs"
 
@@ -108,6 +110,29 @@ async def test_reset_does_not_execute(dut):
     after = h.trace[-1]
     assert (after["osr"], after["x"]) == (before["osr"], before["x"]), \
         "OSR/X changed while rst_n was low"
+
+
+@cocotb.test()
+async def test_reset_sync_timing(dut):
+    """reset_sync.v: rst_n asserts before the next clock edge, releases after two."""
+    prog = load("core_test")
+    h = await Harness.start(dut, prog)
+    await h.reset()
+    await h.run(4)
+
+    # Mid-cycle, well before the next rising edge: assertion must already be through.
+    dut.rst_n.value = 0
+    await Timer(1, unit="us")
+    await ReadOnly()
+    assert int(h.top.rst_n_sync.value) == 0, "reset assertion should be asynchronous"
+    await Timer(1, unit="us")  # leave the read-only phase before driving again
+
+    await h.reset(cycles=3, wait_release=False)
+    await h.run(ResetSync.STAGES)       # rst_n high, synchronizer still releasing
+    assert [s["rst_n_sync"] for s in h.trace[-2:]] == [0, 1]
+    assert [s["pc"] for s in h.trace[-2:]] == [0, 0], "core ran before release"
+    await h.run(1)
+    assert h.trace[-1]["pc"] == 1, "core should run on the first edge after release"
 
 
 @cocotb.test()

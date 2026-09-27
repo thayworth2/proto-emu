@@ -23,7 +23,7 @@ from cocotb.types import LogicArray
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 import isa  # noqa: E402
-from model import STATE_KEYS, Config, Core  # noqa: E402
+from model import STATE_KEYS, Config, Core, ResetSync  # noqa: E402
 
 
 class Divergence(AssertionError):
@@ -46,6 +46,7 @@ class Harness:
             raise ValueError(f"program assembled for .side_set {program.side_set_count} but "
                              f"the core is configured for {self.cfg.side_set_count}")
         self.model = Core(program.image(), self.cfg)
+        self.rst_sync = ResetSync()
         self.pending = deque()   # words waiting to be written into the TX FIFO
         self.trace = []          # per-cycle RTL state, for protocol decoders
         self.cycle = 0
@@ -90,9 +91,14 @@ class Harness:
         """Queue words for the TX FIFO; one is written per cycle while it has room."""
         self.pending.extend(w & isa.REG_MASK for w in words)
 
-    async def reset(self, cycles=5):
+    async def reset(self, cycles=5, wait_release=True):
+        """Hold rst_n low for `cycles`, then (by default) release it and clock until the
+        synchronizer lets the core run, so the next run() cycle is the first executed."""
         for _ in range(cycles):
             await self._cycle(rst_n=False)
+        if wait_release:
+            for _ in range(ResetSync.STAGES):
+                await self._cycle(rst_n=True)
 
     async def run(self, cycles):
         for _ in range(cycles):
@@ -109,17 +115,18 @@ class Harness:
     # ---- one cycle -----------------------------------------------------------------
 
     async def _cycle(self, rst_n):
-        word = self.pending[0] if (rst_n and self.pending) else None
+        core_rst_n = self.rst_sync.step(rst_n)  # what the core sees at this edge
+        # The FIFO drops writes while held in reset, so only offer one once it's out.
+        word = self.pending[0] if (core_rst_n and self.pending) else None
         # Only consume the word if the FIFO had room; the model's full flag was checked
         # against the RTL's last cycle, so they agree.
-        if word is not None and self.model.fifo is not None \
-                and len(self.model.fifo) < self.cfg.fifo_depth:
+        if word is not None and len(self.model.fifo) < self.cfg.fifo_depth:
             self.pending.popleft()
 
         self.dut.rst_n.value = int(rst_n)
         self.top.tx_wr_en.value = int(word is not None)
         self.top.tx_wr_data.value = word or 0
-        self.model.step(rst_n=rst_n, tx_wr_en=word is not None, tx_wr_data=word or 0)
+        self.model.step(rst_n=core_rst_n, tx_wr_en=word is not None, tx_wr_data=word or 0)
 
         await RisingEdge(self.dut.clk)
         await ReadOnly()
@@ -127,6 +134,9 @@ class Harness:
         rtl = self.rtl_state()
         self.trace.append(rtl)
         self._check_no_x_on_driven_pins()
+        if rtl["rst_n_sync"] != self.rst_sync.out:
+            raise Divergence(f"cycle {self.cycle}: rst_n_sync is {rtl['rst_n_sync']}, "
+                             f"model says {self.rst_sync.out}")
         self._compare(rtl, self.model.snapshot())
         await FallingEdge(self.dut.clk)
 
@@ -143,6 +153,7 @@ class Harness:
             "side_set": _as_int(t.core_side_set.value),
             "tx_empty": _as_bool(t.tx_empty.value),
             "tx_full": _as_bool(t.tx_full.value),
+            "rst_n_sync": _as_int(t.rst_n_sync.value),
         }
 
     def _check_no_x_on_driven_pins(self):

@@ -47,6 +47,30 @@ class Config:
     fifo_depth: int = 4
 
 
+class ResetSync:
+    """src/reset_sync.v: rst_n asserts immediately, releases through STAGES flops."""
+    STAGES = 2
+
+    def __init__(self):
+        self.q = None  # flop contents, first stage first; None = never reset
+
+    def step(self, rst_n):
+        """One clock edge, with rst_n driven since the previous edge. Returns the
+        synchronized rst_n the rest of the design sees at this edge."""
+        if not rst_n:
+            self.q = [0] * self.STAGES  # asynchronous: cleared before the edge
+            return False
+        if self.q is None:
+            raise UseBeforeInit("clocked with rst_n high before any reset")
+        seen = self.q[-1]
+        self.q = [1] + self.q[:-1]
+        return bool(seen)
+
+    @property
+    def out(self):
+        return None if self.q is None else self.q[-1]
+
+
 # State compared against the RTL every cycle. Keys match test/harness.py.
 STATE_KEYS = ("pc", "delay_cnt", "x", "y", "osr", "pins_out", "pins_oe",
               "side_set", "tx_empty", "tx_full")
