@@ -109,6 +109,7 @@ SET_DESTS = _enum("SET_DEST_")
 OUT_DESTS = _enum("OUT_DEST_")
 IN_SRCS = _enum("IN_SRC_")
 WAIT_SRCS = _enum("WAIT_SRC_")
+HOST_CMDS = _enum("HOST_CMD_")     # PROG, FIFO, CTRL (src/host_spi.v)
 PP_DIR_PUSH = D["PUSHPULL_DIR_PUSH"]
 PP_DIR_PULL = D["PUSHPULL_DIR_PULL"]
 

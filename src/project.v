@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Top level: TT pin wiring + structural instantiation only, no logic of
- * its own. Minimal-core bring-up (build order step 2): one core, its
- * program memory, and its TX FIFO. Config (enable/start/wrap/side-set)
- * is hardcoded below until cfgregs.v + host_spi.v exist; the TX FIFO's
- * write port is intentionally left for the testbench to poke directly
- * (dut.user_project.tx_fifo) until then.
+ * its own. One core, its program memory and its TX FIFO, loaded and
+ * enabled by the host over SPI (host_spi.v). The rest of the core config
+ * (start/wrap/side-set) is hardcoded below until cfgregs.v exists.
+ *
+ *   ui_in[0]  host SCK       uio[7:0]  core pins 7..0
+ *   ui_in[1]  host MOSI
+ *   ui_in[2]  host CS_n
  */
 
 `default_nettype none
@@ -25,7 +27,6 @@ module tt_um_thayworth2_proto_emu (
 );
 
   // Hardcoded core config until the host interface can write it.
-  localparam ENABLE         = 1'b1;
   localparam [`PROG_ADDR_W-1:0] START_ADDR  = {`PROG_ADDR_W{1'b0}};
   localparam [`PROG_ADDR_W-1:0] WRAP_BOTTOM = {`PROG_ADDR_W{1'b0}};
   localparam [`PROG_ADDR_W-1:0] WRAP_TOP    = {`PROG_ADDR_W{1'b1}};
@@ -40,22 +41,57 @@ module tt_um_thayworth2_proto_emu (
       .rst_n_sync(rst_n_sync)
   );
 
+  // Host SPI pins: asynchronous to clk, so synchronized before any logic sees them.
+  wire host_sck;
+  wire host_mosi;
+  wire host_cs_n;
+
+  sync #(
+      .WIDTH(3)
+  ) u_host_sync (
+      .clk(clk),
+      .d  (ui_in[2:0]),
+      .q  ({host_cs_n, host_mosi, host_sck})
+  );
+
+  wire                    core_enable;
+  wire                    prog_wr_en;
+  wire [`PROG_ADDR_W-1:0] prog_wr_addr;
+  wire [`INSTR_W-1:0]     prog_wr_data;
+  wire                    tx_wr_en;
+  wire [`REG_WIDTH-1:0]   tx_wr_data;
+
+  host_spi u_host (
+      .clk         (clk),
+      .rst_n       (rst_n_sync),
+      .sck         (host_sck),
+      .mosi        (host_mosi),
+      .cs_n        (host_cs_n),
+      .core_enable (core_enable),
+      .prog_wr_en  (prog_wr_en),
+      .prog_wr_addr(prog_wr_addr),
+      .prog_wr_data(prog_wr_data),
+      .tx_wr_en    (tx_wr_en),
+      .tx_wr_data  (tx_wr_data)
+  );
+
   wire [`PROG_ADDR_W-1:0] pc_addr;
   wire [`INSTR_W-1:0]     instr;
 
   progmem #(
       .INIT_FILE("core_test.hex")
   ) u_progmem (
-      .clk  (clk),
-      .addr (pc_addr),
-      .instr(instr)
+      .clk    (clk),
+      .wr_en  (prog_wr_en),
+      .wr_addr(prog_wr_addr),
+      .wr_data(prog_wr_data),
+      .addr   (pc_addr),
+      .instr  (instr)
   );
 
   wire                    tx_rd_en;
   wire [`REG_WIDTH-1:0]   tx_rd_data;
   wire                    tx_empty;
-  wire                    tx_wr_en;
-  wire [`REG_WIDTH-1:0]   tx_wr_data;
   wire                    tx_full;
 
   fifo #(
@@ -64,8 +100,8 @@ module tt_um_thayworth2_proto_emu (
   ) tx_fifo (
       .clk    (clk),
       .rst_n  (rst_n_sync),
-      .wr_en  (tx_wr_en),    // left undriven here; testbench pokes this directly
-      .wr_data(tx_wr_data),  // for now, until host_spi.v (build order step 7)
+      .wr_en  (tx_wr_en),
+      .wr_data(tx_wr_data),
       .full   (tx_full),
       .rd_en  (tx_rd_en),
       .rd_data(tx_rd_data),
@@ -80,7 +116,7 @@ module tt_um_thayworth2_proto_emu (
       .clk           (clk),
       .rst_n         (rst_n_sync),
 
-      .enable        (ENABLE),
+      .enable        (core_enable),
       .start_addr    (START_ADDR),
       .wrap_bottom   (WRAP_BOTTOM),
       .wrap_top      (WRAP_TOP),
@@ -109,10 +145,9 @@ module tt_um_thayworth2_proto_emu (
       .uio_oe        (uio_oe)
   );
 
-  // Dedicated outputs and host-facing SPI pins are unused until the host
-  // interface (build order step 7+) lands.
+  // Dedicated outputs are unused until the host interface gains a MISO.
   assign uo_out = 8'h00;
 
-  wire _unused = &{ena, uio_in, ui_in, tx_full, 1'b0};
+  wire _unused = &{ena, uio_in, ui_in[7:3], tx_full, 1'b0};
 
 endmodule

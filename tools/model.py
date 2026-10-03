@@ -38,7 +38,8 @@ class NotInRTL(ModelError):
 
 @dataclass
 class Config:
-    """Per-core config registers (hardcoded in project.v until cfgregs.v exists)."""
+    """Per-core config registers (hardcoded in project.v until cfgregs.v exists).
+    `enable` is the default when step() is not given the host's enable bit."""
     enable: bool = True
     start_addr: int = 0
     wrap_bottom: int = 0
@@ -121,8 +122,13 @@ class Core:
 
     # ---- one clock edge --------------------------------------------------------------
 
-    def step(self, rst_n=True, tx_wr_en=False, tx_wr_data=0):
+    def step(self, rst_n=True, tx_wr_en=False, tx_wr_data=0, enable=None, prog_wr=None):
+        """One rising edge. The host interface (src/host_spi.v) is not modelled: its
+        outputs are inputs here. `enable` is its core-enable bit (None: use the
+        config), `prog_wr` is (addr, word) when it writes program memory at this edge."""
         self.cycle += 1
+        if enable is None:
+            enable = self.cfg.enable
 
         if not rst_n:
             # Reset set only: PC, delay, OE, FIFO pointers. X/Y/OSR/pin values hold.
@@ -139,7 +145,7 @@ class Core:
         tx_empty = len(self.fifo) == 0
         tx_full = len(self.fifo) == self.cfg.fifo_depth
 
-        if not self.cfg.enable:
+        if not enable:
             self.pc = self.cfg.start_addr
             self.delay_cnt = 0
         elif self.delay_cnt != 0:
@@ -152,6 +158,10 @@ class Core:
         # FIFO write sees the pre-edge full flag, same as the RTL.
         if tx_wr_en and not tx_full:
             self.fifo.append(tx_wr_data & isa.REG_MASK)
+        # Program memory write lands after this edge's fetch, same as the RTL.
+        if prog_wr is not None:
+            addr, word = prog_wr
+            self.mem[addr] = word & isa.INSTR_MASK
 
     def _execute(self, tx_empty):
         instr = self._instr()

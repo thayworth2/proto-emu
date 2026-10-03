@@ -1,14 +1,20 @@
 """RTL-vs-reference-model lockstep harness.
 
-Each cycle the harness drives the same inputs into the RTL and into tools/model.py,
-clocks both, then compares every architectural register. The first difference raises
-Divergence with both states and the instruction at the PC. It also fails any cycle in
-which a pin with its output enable set is driving X.
+Each cycle the harness clocks the RTL and tools/model.py together, then compares every
+architectural register. The first difference raises Divergence with both states and
+the instruction at the PC. It also fails any cycle in which a pin with its output
+enable set is driving X.
+
+Everything reaches the chip through its pins: the harness is the SPI host, loading the
+program, the TX FIFO and the core enable through src/host_spi.v. The host interface is
+not modelled; each cycle the harness reads its outputs (enable, program write, FIFO
+write) from the RTL and gives the model the same ones. boot() checks that what it
+wrote into program memory is the program.
 
     h = await Harness.start(dut, asm.assemble_file("programs/core_test.asm"))
-    await h.reset()
-    h.push(0xA5000000)
-    await h.run(10)
+    await h.boot()               # reset, load the program, enable the core
+    h.push(0xA5000000)           # queued as an SPI frame; lands ~170 cycles later
+    await h.run(200)
 """
 
 import sys
@@ -30,6 +36,11 @@ class Divergence(AssertionError):
     pass
 
 
+# Host SPI pins on ui_in (src/project.v)
+SCK, MOSI, CS_N = 0x01, 0x02, 0x04
+HOST_IDLE = CS_N
+
+
 def _as_int(value):
     """LogicArray/Logic -> int, or None if any bit is X/Z."""
     return int(value) if value.is_resolvable else None
@@ -47,30 +58,27 @@ class Harness:
                              f"the core is configured for {self.cfg.side_set_count}")
         self.model = Core(program.image(), self.cfg)
         self.rst_sync = ResetSync()
-        self.pending = deque()   # words waiting to be written into the TX FIFO
+        self.host_pins = deque()  # ui_in value per cycle for queued SPI frames
         self.trace = []          # per-cycle RTL state, for protocol decoders
         self.cycle = 0
 
     @classmethod
     async def start(cls, dut, program, period_us=10):
         dut.ena.value = 1
-        dut.ui_in.value = 0
+        dut.ui_in.value = HOST_IDLE
         dut.uio_in.value = 0
         dut.rst_n.value = 0
-        dut.user_project.tx_wr_en.value = 0
-        dut.user_project.tx_wr_data.value = 0
         cocotb.start_soon(Clock(dut.clk, period_us, unit="us").start())
         # Wait until time-0 initial blocks ($readmemh) and constant config ports settle.
         await FallingEdge(dut.clk)
         h = cls(dut, program)
-        h._load_program()
+        h._clear_progmem()
         return h
 
     def _read_config(self):
         """Take core config from the RTL ports so the model can't drift from project.v."""
         c = self.core_rtl
         return Config(
-            enable=bool(int(c.enable.value)),
             start_addr=int(c.start_addr.value),
             wrap_bottom=int(c.wrap_bottom.value),
             wrap_top=int(c.wrap_top.value),
@@ -78,27 +86,78 @@ class Harness:
             fifo_depth=len(self.top.tx_fifo.mem),
         )
 
-    def _load_program(self):
-        """Stand-in for the host interface: write every progmem word, X where unused."""
+    def _clear_progmem(self):
+        """Program memory is not reset: make every word X, as it is at power-up, so a
+        test can only pass on words the host actually wrote."""
         mem = self.top.u_progmem.mem
         unused = LogicArray("X" * isa.INSTR_W)
-        for addr, word in enumerate(self.program.image()):
-            mem[addr].value = unused if word is None else word
+        for addr in range(isa.PROG_DEPTH):
+            mem[addr].value = unused
+
+    # ---- host SPI ------------------------------------------------------------------
+
+    SCK_HALF = 2  # clk cycles per SCK half-period; host_spi.v needs SCK slower than clk/4
+
+    def host_frame(self, *fields):
+        """Queue one SPI frame. Each field is (value, bit count), sent MSB first. A
+        short last field makes a frame that CS_n cuts off mid-word."""
+        pins = [0] * self.SCK_HALF  # CS_n low, SCK low
+        for value, nbits in fields:
+            for i in reversed(range(nbits)):
+                mosi = MOSI if (value >> i) & 1 else 0
+                pins += [mosi] * self.SCK_HALF + [mosi | SCK] * self.SCK_HALF
+        pins += [0] * self.SCK_HALF + [HOST_IDLE] * self.SCK_HALF
+        self.host_pins.extend(pins)
+
+    def load_program(self, words=None, addr=0):
+        """Queue a frame writing `words` (default: the program) from `addr` up."""
+        if words is None:
+            words = self.program.words
+        self.host_frame((isa.HOST_CMDS["PROG"], 8), (addr, 8),
+                        *((w, isa.INSTR_W) for w in words))
+
+    def push(self, *words):
+        """Queue a frame writing words to the TX FIFO. There is no flow control: a
+        word that arrives while the FIFO is full is dropped, in RTL and model alike."""
+        self.host_frame((isa.HOST_CMDS["FIFO"], 8),
+                        *((w & isa.REG_MASK, isa.REG_WIDTH) for w in words))
+
+    def set_enable(self, on):
+        self.host_frame((isa.HOST_CMDS["CTRL"], 8), (int(on), 8))
+
+    async def host_idle(self):
+        """Run until every queued frame has been sent and has taken effect."""
+        while self.host_pins:
+            await self._cycle(rst_n=True)
+        await self.run(4)  # synchronizer + edge detect + write strobe
 
     # ---- stimulus ----------------------------------------------------------------
 
-    def push(self, *words):
-        """Queue words for the TX FIFO; one is written per cycle while it has room."""
-        self.pending.extend(w & isa.REG_MASK for w in words)
-
     async def reset(self, cycles=5, wait_release=True):
         """Hold rst_n low for `cycles`, then (by default) release it and clock until the
-        synchronizer lets the core run, so the next run() cycle is the first executed."""
+        synchronizer has let go. The core comes out of reset disabled."""
         for _ in range(cycles):
             await self._cycle(rst_n=False)
         if wait_release:
             for _ in range(ResetSync.STAGES):
                 await self._cycle(rst_n=True)
+
+    async def boot(self):
+        """Reset, load the program over SPI and enable the core. Returns with the core
+        about to execute its first instruction on the next run() cycle."""
+        await self.reset()
+        self.load_program()
+        self.set_enable(True)
+        for _ in range(len(self.host_pins) + 8):
+            await self._cycle(rst_n=True)
+            if self.trace[-1]["enable"]:
+                break
+        else:
+            raise Divergence("core enable never set by the host interface")
+        image = self.program.image()
+        if self.model.mem != image:
+            bad = [a for a, (got, want) in enumerate(zip(self.model.mem, image)) if got != want]
+            raise Divergence(f"host interface wrote the wrong program: addresses {bad} differ")
 
     async def run(self, cycles):
         for _ in range(cycles):
@@ -116,17 +175,13 @@ class Harness:
 
     async def _cycle(self, rst_n):
         core_rst_n = self.rst_sync.step(rst_n)  # what the core sees at this edge
-        # The FIFO drops writes while held in reset, so only offer one once it's out.
-        word = self.pending[0] if (core_rst_n and self.pending) else None
-        # Only consume the word if the FIFO had room; the model's full flag was checked
-        # against the RTL's last cycle, so they agree.
-        if word is not None and len(self.model.fifo) < self.cfg.fifo_depth:
-            self.pending.popleft()
+        # The host interface's outputs are registered, so what they hold now is what
+        # the core, FIFO and program memory see at this edge. In reset nothing does.
+        host = self._host_outputs() if core_rst_n else {}
 
         self.dut.rst_n.value = int(rst_n)
-        self.top.tx_wr_en.value = int(word is not None)
-        self.top.tx_wr_data.value = word or 0
-        self.model.step(rst_n=core_rst_n, tx_wr_en=word is not None, tx_wr_data=word or 0)
+        self.dut.ui_in.value = self.host_pins.popleft() if self.host_pins else HOST_IDLE
+        self.model.step(rst_n=core_rst_n, **host)
 
         await RisingEdge(self.dut.clk)
         await ReadOnly()
@@ -140,9 +195,28 @@ class Harness:
         self._compare(rtl, self.model.snapshot())
         await FallingEdge(self.dut.clk)
 
+    def _host_outputs(self):
+        t = self.top
+
+        def known(handle, name):
+            value = _as_int(handle.value)
+            if value is None:
+                raise Divergence(f"cycle {self.cycle}: host interface output {name} is X")
+            return value
+
+        out = {"enable": bool(known(t.core_enable, "core_enable")),
+               "tx_wr_en": bool(known(t.tx_wr_en, "tx_wr_en"))}
+        if out["tx_wr_en"]:
+            out["tx_wr_data"] = known(t.tx_wr_data, "tx_wr_data")
+        if known(t.prog_wr_en, "prog_wr_en"):
+            out["prog_wr"] = (known(t.prog_wr_addr, "prog_wr_addr"),
+                              known(t.prog_wr_data, "prog_wr_data"))
+        return out
+
     def rtl_state(self):
         c, t = self.core_rtl, self.top
         return {
+            "enable": _as_bool(t.core_enable.value),
             "pc": _as_int(c.pc.value),
             "delay_cnt": _as_int(c.delay_cnt.value),
             "x": _as_int(c.x.value),

@@ -4,7 +4,7 @@
  *
  * Instruction memory. Flip-flop array for now; will be replaced by an SRAM
  * macro once available macros/word widths are known (build order step 1/6).
- * The host interface (not yet built) will write this array over SPI; for
+ * The host interface (host_spi.v) writes this array over SPI; for
  * bring-up, simulation loads it directly with $readmemh.
  */
 
@@ -18,6 +18,9 @@ module progmem #(
     parameter INIT_FILE = ""
 ) (
     input  wire                 clk,
+    input  wire                 wr_en,
+    input  wire [ADDR_W-1:0]    wr_addr,
+    input  wire [WORD_W-1:0]    wr_data,
     input  wire [ADDR_W-1:0]    addr,
     output wire [WORD_W-1:0]    instr
 );
@@ -38,6 +41,9 @@ module progmem #(
   // Will need a fetch-stage register once this becomes a real SRAM macro.
   assign instr = mem[addr];
 
-  wire _unused = &{clk, 1'b0};
+  // Not reset: the host loads every word a program uses before enabling a core.
+  always @(posedge clk) begin
+    if (wr_en) mem[wr_addr] <= wr_data;
+  end
 
 endmodule

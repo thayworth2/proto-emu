@@ -114,6 +114,13 @@
 `define PUSHPULL_DIR_PULL    1'b1
 
 // ---------------------------------------------------------------------------
+// Host interface command byte (host_spi.v): [1:0] command, [7:2] reserved
+// ---------------------------------------------------------------------------
+`define HOST_CMD_PROG  2'd1  // address byte, then instructions
+`define HOST_CMD_FIFO  2'd2  // TX FIFO words
+`define HOST_CMD_CTRL  2'd3  // control byte: bit 0 = core enable
+
+// ---------------------------------------------------------------------------
 // Datapath widths (may narrow once the SRAM macro word width is known)
 // ---------------------------------------------------------------------------
 `define REG_WIDTH   32

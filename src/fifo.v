@@ -3,8 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Synchronous FIFO used for both TX and RX (depth/width parameterized).
- * No host interface yet: for bring-up the testbench drives wr_en/wr_data
- * directly (TX side) to feed PULL instructions.
+ * A write while full and a read while empty are both ignored.
  */
 
 `default_nettype none

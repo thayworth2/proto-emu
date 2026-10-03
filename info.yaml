@@ -19,6 +19,8 @@ project:
   # proto_emu_pkg.vh is `include`d by the files below, not listed separately.
   source_files:
     - "reset_sync.v"
+    - "sync.v"
+    - "host_spi.v"
     - "progmem.v"
     - "fifo.v"
     - "shiftreg.v"
@@ -30,9 +32,9 @@ project:
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
 pinout:
   # Inputs
-  ui[0]: ""
-  ui[1]: ""
-  ui[2]: ""
+  ui[0]: "Host SPI SCK"
+  ui[1]: "Host SPI MOSI"
+  ui[2]: "Host SPI CS_n"
   ui[3]: ""
   ui[4]: ""
   ui[5]: ""
@@ -50,14 +52,14 @@ pinout:
   uo[7]: ""
 
   # Bidirectional pins
-  uio[0]: ""
-  uio[1]: ""
-  uio[2]: ""
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  uio[0]: "Core pin 0"
+  uio[1]: "Core pin 1"
+  uio[2]: "Core pin 2"
+  uio[3]: "Core pin 3"
+  uio[4]: "Core pin 4"
+  uio[5]: "Core pin 5"
+  uio[6]: "Core pin 6"
+  uio[7]: "Core pin 7"
 
 # Do not change!
 yaml_version: 6
