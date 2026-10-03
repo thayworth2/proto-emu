@@ -10,6 +10,7 @@ import cocotb
 from cocotb.triggers import ReadOnly, Timer
 
 from harness import Divergence, Harness
+import uart
 
 import asm  # on sys.path via harness
 from model import ResetSync
@@ -153,3 +154,39 @@ async def test_harness_catches_divergence(dut):
         assert "pins_out" in str(e) and "osr" in str(e)
     else:
         raise AssertionError("harness missed a deliberate RTL/model difference")
+
+
+UART_BIT_CYCLES = 16  # set by the delays in programs/uart_tx.asm
+
+
+@cocotb.test()
+async def test_uart_tx(dut):
+    """uart_tx.asm: bytes pushed into the TX FIFO come out of pin 0 as 8N1 frames,
+    16 cycles per bit, back to back while the FIFO has data, idle high otherwise."""
+    prog = load("uart_tx")
+    h = await Harness.start(dut, prog)
+    await h.reset()
+    start = len(h.trace)
+
+    await h.run(40)  # FIFO empty: the line must be driven and idle high
+    assert h.trace[-1]["pins_oe"] & 1, "TX pin should be an output"
+    assert uart.decode(uart.line_levels(h.trace[start:]), UART_BIT_CYCLES) == []
+
+    burst = bytes([0x55, 0x41, 0x52, 0x54, 0x00, 0xFF])  # "UART", then all-0 and all-1 data
+    frame = 10 * UART_BIT_CYCLES
+    h.push(*(uart.tx_word(b) for b in burst))
+    await h.run(len(burst) * frame + 40)
+
+    h.push(uart.tx_word(0xA5))  # after an idle gap
+    await h.run(frame + 40)
+
+    levels = uart.line_levels(h.trace[start:])
+    assert all(levels[:40]), "line dropped low with nothing to send"
+    frames = uart.decode(levels, UART_BIT_CYCLES)
+    assert bytes(b for _, b in frames) == burst + bytes([0xA5]), f"decoded {frames}"
+
+    starts = [s for s, _ in frames]
+    gaps = [b - a for a, b in zip(starts, starts[1:])]
+    assert gaps[:len(burst) - 1] == [frame] * (len(burst) - 1), \
+        f"back-to-back frames should start exactly {frame} cycles apart, got {gaps}"
+    assert gaps[-1] > frame, "last byte was pushed after an idle gap"
